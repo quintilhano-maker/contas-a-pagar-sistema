@@ -21,15 +21,22 @@ def load_users():
         # Tenta carregar do arquivo users.json
         import json
         with open('users.json', 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        # Se não existir, cria com usuários padrão
+            content = f.read().strip()
+            if not content:
+                raise ValueError("Arquivo vazio")
+            return json.loads(content)
+    except (FileNotFoundError, ValueError, json.JSONDecodeError):
+        # Se não existir ou estiver vazio, cria com usuários padrão
         default_users = {
             "admin": hash_password("admin123"),
             "usuario": hash_password("user123"),
             "financeiro": hash_password("fin123")
         }
-        save_users(default_users)
+        try:
+            save_users(default_users)
+        except Exception:
+            # Se não conseguir salvar, retorna os usuários padrão mesmo assim
+            pass
         return default_users
 
 def save_users(users):
