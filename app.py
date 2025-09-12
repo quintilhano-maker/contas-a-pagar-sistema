@@ -471,14 +471,12 @@ elif page == "Aprovações":
         escolha = st.selectbox("Conta para aprovar", options=pendentes["id"], format_func=lambda x: pendentes.loc[pendentes["id"]==x, "label"].values[0])
         aprovado_por = st.text_input("Aprovado por *")
         data_aprovacao = st.date_input("Data de aprovação", value=datetime.today())
-        data_agendamento_banco = st.date_input("Data Agendamento Banco", value=datetime.today())
         obs = st.text_area("Observação")
         if st.button("Confirmar Aprovação"):
             insert("aprovacoes", {
                 "conta_id": int(escolha), 
                 "aprovado_por": aprovado_por or "Diretoria", 
                 "data_aprovacao": data_aprovacao.strftime("%Y-%m-%d"), 
-                "data_agendamento_banco": data_agendamento_banco.strftime("%Y-%m-%d"),
                 "observacao": obs
             })
             upsert("contas", {"id": int(escolha), "status": "aprovado"})
@@ -511,7 +509,6 @@ elif page == "Aprovações":
                     "Valor": money(conta.get("valor_previsto", 0)),
                     "Aprovado por": aprov.get("aprovado_por", "N/A"),
                     "Data aprovação": aprov.get("data_aprovacao", "N/A"),
-                    "Data Agendamento Banco": aprov.get("data_agendamento_banco", "N/A"),
                     "Observação": aprov.get("observacao", ""),
                     "Criado em": aprov.get("criado_em", "N/A")
                 })
