@@ -1,3 +1,28 @@
+# Ambiente/segredos
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+.streamlit/secrets.*.toml
+!.streamlit/secrets.toml.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+
+# Sistema/IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Dados locais
+users.json
+*.csv
+*.xlsx
 # Python
 __pycache__/
 *.py[cod]

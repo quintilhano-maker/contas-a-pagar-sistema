@@ -7,7 +7,9 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from supabase import create_client, Client
 import hashlib
+from dotenv import load_dotenv
 
+load_dotenv()
 st.set_page_config(page_title="Contas a Pagar", page_icon="💸", layout="wide")
 
 # Sistema de Autenticação
@@ -16,7 +18,12 @@ def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 def load_users():
-    """Carrega usuários do arquivo de configuração"""
+    """Carrega usuários a partir de `users.json`.
+
+    Se o arquivo não existir/estiver inválido, realiza bootstrap seguro criando
+    apenas o usuário 'admin' com senha vinda de segredos:
+    - st.secrets['ADMIN_INITIAL_PASSWORD'] OU variável de ambiente 'ADMIN_INITIAL_PASSWORD'
+    """
     try:
         # Tenta carregar do arquivo users.json
         import json
@@ -26,16 +33,22 @@ def load_users():
                 raise ValueError("Arquivo vazio")
             return json.loads(content)
     except (FileNotFoundError, ValueError, json.JSONDecodeError):
-        # Se não existir ou estiver vazio, cria com usuários padrão
-        default_users = {
-            "admin": hash_password("admin123"),
-            "usuario": hash_password("user123"),
-            "financeiro": hash_password("fin123")
-        }
+        # Bootstrap seguro do admin a partir de segredos
+        admin_pwd = None
+        try:
+            admin_pwd = st.secrets.get('ADMIN_INITIAL_PASSWORD')
+        except Exception:
+            admin_pwd = None
+        if not admin_pwd:
+            admin_pwd = os.environ.get('ADMIN_INITIAL_PASSWORD')
+        if not admin_pwd:
+            raise RuntimeError(
+                "Configuração de usuários não encontrada. Defina ADMIN_INITIAL_PASSWORD em st.secrets ou variável de ambiente para criar o usuário 'admin' no primeiro acesso."
+            )
+        default_users = {"admin": hash_password(str(admin_pwd))}
         try:
             save_users(default_users)
         except Exception:
-            # Se não conseguir salvar, retorna os usuários padrão mesmo assim
             pass
         return default_users
 
@@ -117,17 +130,23 @@ def logout():
     st.rerun()
 
 def env_get(key: str):
-    """Lê primeiro st.secrets, depois credenciais hardcoded como fallback."""
+    """Obtém configuração segura: st.secrets → variável de ambiente → None.
+
+    NUNCA usa fallback hardcoded.
+    """
     # 1) st.secrets (protegido)
     try:
         return st.secrets[key]
     except Exception:
-        # 2) Credenciais hardcoded como fallback
-        if key == "SUPABASE_URL":
-            return "https://ikmubzpieogvheefejjz.supabase.co"
-        elif key == "SUPABASE_ANON_KEY":
-            return "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlrbXVienBpZW9ndmhlZWZlamp6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY5MzM3MDksImV4cCI6MjA3MjUwOTcwOX0.W_TpmjMvmhnIoUd1L2HzoBkN9VxuJ14RQ2vMD7ofvOw"
-        return None
+        pass
+    # 2) Variáveis de ambiente
+    return os.environ.get(key)
+
+def _str_to_bool(value) -> bool:
+    if value is None:
+        return False
+    s = str(value).strip().lower()
+    return s in ("1", "true", "t", "yes", "y", "on")
 
 @st.cache_resource
 def get_client() -> Client:
@@ -142,6 +161,19 @@ def get_client() -> Client:
     return create_client(url, key)
 
 sb = get_client()
+
+# Garante bootstrap seguro de usuários antes de exibir a tela de login
+def _ensure_users_bootstrap():
+    try:
+        _ = load_users()
+    except Exception as e:
+        if _str_to_bool(env_get('DEBUG')):
+            st.exception(e)
+        else:
+            st.error("Falha ao inicializar usuários. Verifique ADMIN_INITIAL_PASSWORD nas variáveis de ambiente.")
+        st.stop()
+
+_ensure_users_bootstrap()
 
 # Verificação de autenticação
 if 'authenticated' not in st.session_state:
@@ -189,7 +221,11 @@ def fetch_table(table, select="*", order=None, eq=None):
         if order: q = q.order(order, desc=True)
         return pd.DataFrame(q.execute().data or [])
     except Exception as e:
-        st.warning(f"⚠️ Erro de conexão com o banco de dados: {str(e)[:100]}...")
+        msg = f"⚠️ Erro de conexão com o banco de dados."
+        if _str_to_bool(env_get('DEBUG')):
+            st.warning(f"{msg} Detalhes: {str(e)[:300]}...")
+        else:
+            st.warning(msg)
         return pd.DataFrame()
 
 def upsert(table, payload): 
@@ -207,14 +243,22 @@ def upsert(table, payload):
                 return sb.table(table).update(existing).eq("id", payload["id"]).execute()
         return sb.table(table).upsert(payload).execute()
     except Exception as e:
-        st.error(f"Erro ao salvar dados: {str(e)[:100]}...")
+        msg = "Erro ao salvar dados."
+        if _str_to_bool(env_get('DEBUG')):
+            st.error(f"{msg} Detalhes: {str(e)[:300]}...")
+        else:
+            st.error(msg)
         return None
 
 def insert(table, payload): 
     try:
         return sb.table(table).insert(payload).execute()
     except Exception as e:
-        st.error(f"Erro ao inserir dados: {str(e)[:100]}...")
+        msg = "Erro ao inserir dados."
+        if _str_to_bool(env_get('DEBUG')):
+            st.error(f"{msg} Detalhes: {str(e)[:300]}...")
+        else:
+            st.error(msg)
         return None
 
 def delete_conta(conta_id):
@@ -228,7 +272,10 @@ def delete_conta(conta_id):
         result = sb.table("contas").delete().eq("id", conta_id).execute()
         return result
     except Exception as e:
-        st.error(f"Erro ao excluir conta: {e}")
+        if _str_to_bool(env_get('DEBUG')):
+            st.exception(e)
+        else:
+            st.error(f"Erro ao excluir conta: {str(e)[:200]}...")
         return None
 
 def ensure_categoria(nome):
@@ -633,19 +680,16 @@ elif page == "Pagamentos/Conciliação":
                     }
                     st.info(f"📋 Mapeamento por posição: data='{col_names[0]}', historico='{col_names[1]}', valor='{col_names[2]}'")
             
-            # Debug: Mostra o mapeamento encontrado
-            st.write("🔍 **Debug - Mapeamento de colunas:**")
-            for key, value in col_mapping.items():
-                st.write(f"- {key}: '{value}'")
-            
-            # Debug: Mostra as primeiras linhas do CSV original
-            st.write("🔍 **Debug - Primeiras 3 linhas do CSV original:**")
-            st.write(df_csv.head(3))
-            
-            # Mostra o mapeamento encontrado
-            st.write("**Mapeamento de colunas encontrado:**")
-            for col_type, col_name in col_mapping.items():
-                st.write(f"- {col_type}: '{col_name}'")
+            # Debug opcional
+            if _str_to_bool(env_get('DEBUG')):
+                st.write("🔍 **Debug - Mapeamento de colunas:**")
+                for key, value in col_mapping.items():
+                    st.write(f"- {key}: '{value}'")
+                st.write("🔍 **Debug - Primeiras 3 linhas do CSV original:**")
+                st.write(df_csv.head(3))
+                st.write("**Mapeamento de colunas encontrado:**")
+                for col_type, col_name in col_mapping.items():
+                    st.write(f"- {col_type}: '{col_name}'")
             
             if len(col_mapping) == 3:
                 try:
@@ -659,9 +703,10 @@ elif page == "Pagamentos/Conciliação":
                     st.info(f"📊 Estatísticas do arquivo: {len(df_csv_norm)} linhas processadas")
                     st.info(f"💰 Valores encontrados: Min: {df_csv_norm['valor'].min():.2f}, Max: {df_csv_norm['valor'].max():.2f}")
                     
-                    # Debug: Mostra alguns valores para análise
-                    st.write("🔍 **Debug - Primeiros 5 valores encontrados:**")
-                    st.write(df_csv_norm[['data', 'historico', 'valor']].head())
+                    # Debug opcional: amostra dos dados importados
+                    if _str_to_bool(env_get('DEBUG')):
+                        st.write("🔍 **Debug - Primeiros 5 valores encontrados:**")
+                        st.write(df_csv_norm[['data', 'historico', 'valor']].head())
                     
                     # Conta valores negativos e positivos
                     negativos = df_csv_norm[df_csv_norm['valor'] < 0]
@@ -680,12 +725,16 @@ elif page == "Pagamentos/Conciliação":
                         st.info("💡 Dica: O sistema procura por valores negativos. Verifique se os valores de saída estão com sinal negativo.")
                         
                 except Exception as e:
-                    st.error(f"Erro ao processar o arquivo: {str(e)}")
+                    if _str_to_bool(env_get('DEBUG')):
+                        st.exception(e)
+                    else:
+                        st.error("Erro ao processar o arquivo.")
             else:
                 missing = [col for col in ["data", "historico", "valor"] if col not in col_mapping]
                 st.error(f"❌ Colunas obrigatórias não encontradas: {', '.join(missing)}")
-                st.write("**Colunas disponíveis no arquivo:**", list(df_csv.columns))
-                st.write("**Tentativas de mapeamento:**", col_mapping)
+                if _str_to_bool(env_get('DEBUG')):
+                    st.write("**Colunas disponíveis no arquivo:**", list(df_csv.columns))
+                    st.write("**Tentativas de mapeamento:**", col_mapping)
     st.subheader("Conciliação automática (valor + data ±3 dias)")
     extrato = fetch_table("extrato", order="data")
     to_match = extrato.copy()
@@ -1257,21 +1306,21 @@ elif page == "ETL/Importação":
                 # Mostra informações sobre a leitura
                 st.info(f"✅ Arquivo lido com sucesso! Codificação: {used_encoding}, Delimitador: '{used_sep}'")
                 
-                # Mostra as primeiras linhas para debug
-                st.write("**Primeiras 3 linhas do arquivo:**")
-                st.write(df.head(3))
-                
-                # Debug: Mostra informações sobre o DataFrame
-                st.write(f"**Debug - Shape do DataFrame:** {df.shape}")
-                st.write(f"**Debug - Colunas detectadas:** {list(df.columns)}")
-                st.write(f"**Debug - Tipos de dados:** {df.dtypes.to_dict()}")
+                # Debug opcional
+                if _str_to_bool(env_get('DEBUG')):
+                    st.write("**Primeiras 3 linhas do arquivo:**")
+                    st.write(df.head(3))
+                    st.write(f"**Debug - Shape do DataFrame:** {df.shape}")
+                    st.write(f"**Debug - Colunas detectadas:** {list(df.columns)}")
+                    st.write(f"**Debug - Tipos de dados:** {df.dtypes.to_dict()}")
                 
             req = ["fornecedor","categoria","descricao","vencimento","valor_previsto"]
             opt = ["empresa","cnpj","numero_documento"]
             
-            # Mostra as colunas encontradas para debug
-            st.write("**Colunas encontradas no arquivo:**")
-            st.write(list(df.columns))
+            # Debug opcional
+            if _str_to_bool(env_get('DEBUG')):
+                st.write("**Colunas encontradas no arquivo:**")
+                st.write(list(df.columns))
             
             # Mapeia colunas com variações de nomes (remove acentos e converte para minúsculo)
             import unicodedata
@@ -1331,16 +1380,18 @@ elif page == "ETL/Importação":
                             col_mapping[opt_col] = orig_col
                             break
             
-            # Debug: Mostra o mapeamento encontrado
-            st.write("**🔍 Mapeamento de colunas encontrado:**")
-            for key, value in col_mapping.items():
-                st.write(f"- {key}: '{value}'")
+            # Debug opcional
+            if _str_to_bool(env_get('DEBUG')):
+                st.write("**🔍 Mapeamento de colunas encontrado:**")
+                for key, value in col_mapping.items():
+                    st.write(f"- {key}: '{value}'")
             
             if not all(c in col_mapping for c in req):
                 missing = [c for c in req if c not in col_mapping]
                 st.error(f"❌ Colunas obrigatórias não encontradas: {', '.join(missing)}")
-                st.write("**Colunas disponíveis no arquivo:**", list(df.columns))
-                st.write("**Colunas normalizadas:**", list(normalized_cols.keys()))
+                if _str_to_bool(env_get('DEBUG')):
+                    st.write("**Colunas disponíveis no arquivo:**", list(df.columns))
+                    st.write("**Colunas normalizadas:**", list(normalized_cols.keys()))
             else:
                 inserted = 0
                 for _, r in df.iterrows():

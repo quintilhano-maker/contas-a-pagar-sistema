@@ -37,11 +37,23 @@ cd contas_a_pagar_streamlit_supabase_full
 pip install -r requirements.txt
 ```
 
-3. Configure as variáveis de ambiente no arquivo `.streamlit/secrets.toml`:
-```toml
-SUPABASE_URL = "sua_url_do_supabase"
-SUPABASE_KEY = "sua_chave_do_supabase"
-```
+3. Configure as variáveis de ambiente (NÃO commitá segredos):
+
+   Opção A) `.streamlit/secrets.toml` (recomendado para produção/Streamlit Cloud)
+   ```toml
+   SUPABASE_URL = "sua_url_do_supabase"
+   SUPABASE_ANON_KEY = "sua_chave_publica_anon"
+   ADMIN_INITIAL_PASSWORD = "senha_inicial_admin_forte"
+   DEBUG = false
+   ```
+
+   Opção B) `.env` (somente local; o app carrega automaticamente)
+   ```env
+   SUPABASE_URL=
+   SUPABASE_ANON_KEY=
+   ADMIN_INITIAL_PASSWORD=
+   DEBUG=false
+   ```
 
 4. Execute o aplicativo:
 ```bash
@@ -56,7 +68,7 @@ streamlit run app.py
 2. Acesse [share.streamlit.io](https://share.streamlit.io)
 3. Conecte sua conta GitHub
 4. Selecione o repositório
-5. Configure as variáveis de ambiente no Streamlit Cloud
+5. Configure as variáveis de ambiente no Streamlit Cloud (.streamlit/secrets)
 6. Deploy automático!
 
 ## 📊 Estrutura do Banco
@@ -71,6 +83,12 @@ O sistema utiliza as seguintes tabelas no Supabase:
 ## 🔧 Configuração do Supabase
 
 Execute o script SQL fornecido no arquivo `schema.sql` no seu banco Supabase para criar as tabelas necessárias.
+
+## 🔒 Boas práticas de segurança
+
+- Nunca commit suas chaves reais. Este repositório inclui `.gitignore` para ignorar `.env` e `.streamlit/secrets.toml`.
+- Se você já publicou chaves no histórico, gere novas no Supabase (revogue as antigas) e atualize seus segredos.
+- O usuário `admin` é criado no primeiro boot usando `ADMIN_INITIAL_PASSWORD`. Altere a senha após o primeiro login.
 
 ## 📝 Licença
 
