@@ -59,12 +59,6 @@ streamlit run app.py
 5. Configure as variáveis de ambiente no Streamlit Cloud
 6. Deploy automático!
 
-## 👥 Usuários Padrão
-
-- **admin** / admin123 (acesso total)
-- **usuario** / user123 (acesso padrão)
-- **financeiro** / fin123 (acesso financeiro)
-
 ## 📊 Estrutura do Banco
 
 O sistema utiliza as seguintes tabelas no Supabase:
