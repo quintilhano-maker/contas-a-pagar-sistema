@@ -89,7 +89,7 @@ def list_users():
 
 def login_page():
     """Página de login"""
-    st.title("🔐 Sistema de Contas a Pagar")
+    st.title("🔐 Painel Corporativo LGMOI")
     st.markdown("---")
     
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -1028,6 +1028,9 @@ elif page == "Dashboard":
     if not contas.empty and "vencimento" in contas.columns:
         v_series = pd.to_datetime(contas["vencimento"], errors="coerce").dt.date
         contas = contas[(v_series >= periodo_ini) & (v_series <= periodo_fim)]
+    
+    # Hoje para métricas auxiliares
+    hoje = pd.Timestamp.today().normalize()
 
     if contas.empty:
         st.info("📭 Nenhuma conta encontrada.")
@@ -1124,12 +1127,8 @@ elif page == "Dashboard":
             st.pyplot(fig1)
         
         with col_graf2:
-            st.markdown("### 📅 Contas por Mês")
-            hoje = pd.Timestamp.today().normalize()
-            futuro_6m = hoje + relativedelta(months=6)
-            mask = (contas["vencimento"] >= hoje) & (contas["vencimento"] <= futuro_6m)
-            por_mes = contas.loc[mask].copy()
-            
+            st.markdown("### 📅 Contas por Mês (Período selecionado)")
+            por_mes = contas.copy()
             if not por_mes.empty:
                 por_mes["ano_mes"] = por_mes["vencimento"].dt.to_period("M").astype(str)
                 s = por_mes.groupby("ano_mes")["valor_previsto"].sum().sort_index()
@@ -1155,9 +1154,8 @@ elif page == "Dashboard":
                 st.pyplot(fig2)
         
         # Gráfico de gastos por categoria
-        st.markdown("### 🏷️ Gastos por Categoria (Últimos 90 dias)")
-        ult_90 = hoje - pd.Timedelta(days=90)
-        recorte = contas[(contas["vencimento"] >= ult_90) & (contas["vencimento"] <= hoje)].copy()
+        st.markdown("### 🏷️ Gastos por Categoria (Período selecionado)")
+        recorte = contas.copy()
         
         if not recorte.empty:
             s2 = recorte.groupby("categoria_id")["valor_previsto"].sum().sort_values(ascending=True)
