@@ -117,11 +117,8 @@ def login_page():
                 else:
                     st.error("❌ Usuário ou senha incorretos!")
         
+        # Lista de usuários oculta na tela de login por solicitação
         st.markdown("---")
-        st.markdown("### 👥 Usuários Cadastrados:")
-        users = list_users()
-        for user in users:
-            st.markdown(f"- **{user}**")
 
 def logout():
     """Função para logout"""
@@ -418,6 +415,20 @@ if page == "Lançar Contas":
             else:
                 valor_max_default = 0.0
             valor_max = st.number_input("Valor Máximo (R$)", min_value=0.0, value=valor_max_default, step=0.01)
+
+        # Filtro por faixa de vencimento
+        # Calcula datas mínima e máxima
+        dates_series = pd.to_datetime(df_display.get("vencimento"), errors="coerce") if not df_display.empty else pd.Series([], dtype="datetime64[ns]")
+        if not dates_series.dropna().empty:
+            min_date_default = dates_series.min().date()
+            max_date_default = dates_series.max().date()
+        else:
+            today_default = datetime.today().date()
+            min_date_default = today_default
+            max_date_default = today_default
+        col_dt1, col_dt2 = st.columns(2)
+        venc_ini = col_dt1.date_input("Vencimento de", value=min_date_default)
+        venc_fim = col_dt2.date_input("Vencimento até", value=max_date_default)
         
         # Filtro de busca por texto
         st.write("**🔍 Busca por Texto:**")
@@ -450,6 +461,14 @@ if page == "Lançar Contas":
         if categoria_filtro != "Todos":
             df_filtrado = df_filtrado[df_filtrado["categoria_nome"] == categoria_filtro]
         
+        # Aplica filtro de data de vencimento (faixa)
+        if "vencimento" in df_filtrado.columns:
+            venc_series = pd.to_datetime(df_filtrado["vencimento"], errors="coerce").dt.date
+            if venc_ini:
+                df_filtrado = df_filtrado[venc_series >= venc_ini]
+            if venc_fim:
+                df_filtrado = df_filtrado[venc_series <= venc_fim]
+
         if valor_min > 0 or valor_max > 0:
             # Converte valores monetários para float para comparação
             valores_numericos = df_filtrado["valor_previsto"].str.replace("R$", "").str.replace(".", "").str.replace(",", ".").astype(float)
@@ -566,7 +585,25 @@ elif page == "Aprovações":
             
             # Seção de exclusão de aprovações
             st.subheader("🗑️ Excluir Aprovação")
-            aprovacoes["label"] = aprovacoes.apply(lambda r: f'#{int(r["id"])} - Conta #{r.get("conta_id","N/A")} | Aprovado por: {r.get("aprovado_por","N/A")} | Data: {r.get("data_aprovacao","N/A")}', axis=1)
+            # Enriquecer rótulo com nome do fornecedor
+            fornecedores_map = {}
+            try:
+                fornecedores_df = fetch_table("fornecedores")
+                if not fornecedores_df.empty:
+                    fornecedores_map = dict(zip(fornecedores_df["id"], fornecedores_df["nome"]))
+            except Exception:
+                fornecedores_map = {}
+
+            def _label_aprovacao(row):
+                conta_rel = contas_aprovadas[contas_aprovadas["id"] == row["conta_id"]]
+                fornecedor_nome = "N/A"
+                if not conta_rel.empty:
+                    fornecedor_id = conta_rel.iloc[0].get("fornecedor_id")
+                    if fornecedor_id in fornecedores_map:
+                        fornecedor_nome = fornecedores_map[fornecedor_id]
+                return f'#{int(row["id"])} - Conta #{row.get("conta_id","N/A")} | Fornecedor: {fornecedor_nome} | Aprovado por: {row.get("aprovado_por","N/A")} | Data: {row.get("data_aprovacao","N/A")}'
+
+            aprovacoes["label"] = aprovacoes.apply(_label_aprovacao, axis=1)
             
             col1, col2 = st.columns([3, 1])
             with col1:
@@ -878,41 +915,6 @@ elif page == "Pagamentos/Conciliação":
     
     st.subheader("🗑️ Excluir Contas")
     st.write("**Atenção:** Esta ação excluirá permanentemente a conta e todos os registros relacionados (aprovacoes, pagamentos).")
-    
-    # Opção para excluir todas as contas
-    st.write("**⚠️ Exclusão em Massa:**")
-    col_excluir_todas, col_cancelar = st.columns([1, 1])
-    
-    with col_excluir_todas:
-        if st.button("🗑️ EXCLUIR TODAS AS CONTAS", type="secondary", help="Esta ação excluirá TODAS as contas do sistema"):
-            if st.session_state.get('confirm_delete_all', False):
-                # Confirmação dupla
-                todas_contas = fetch_table("contas")
-                if not todas_contas.empty:
-                    # Exclui todas as aprovações
-                    sb.table("aprovacoes").delete().neq("id", 0).execute()
-                    # Exclui todos os pagamentos
-                    sb.table("pagamentos").delete().neq("id", 0).execute()
-                    # Exclui todas as contas
-                    sb.table("contas").delete().neq("id", 0).execute()
-                    st.success(f"✅ {len(todas_contas)} contas excluídas com sucesso!")
-                    st.session_state['confirm_delete_all'] = False
-                    st.rerun()
-                else:
-                    st.info("Nenhuma conta encontrada para excluir.")
-            else:
-                st.session_state['confirm_delete_all'] = True
-                st.warning("⚠️ Clique novamente para confirmar a exclusão de TODAS as contas!")
-    
-    with col_cancelar:
-        if st.session_state.get('confirm_delete_all', False):
-            if st.button("❌ Cancelar Exclusão"):
-                st.session_state['confirm_delete_all'] = False
-                st.rerun()
-    
-    if st.session_state.get('confirm_delete_all', False):
-        st.error("⚠️ **CONFIRMAÇÃO NECESSÁRIA:** Clique novamente em 'EXCLUIR TODAS AS CONTAS' para confirmar!")
-    
     st.write("---")
     st.write("**🔍 Exclusão Individual:**")
     
@@ -996,6 +998,37 @@ elif page == "Dashboard":
     pagamentos = fetch_table("pagamentos")
     categorias = fetch_table("categorias")
     
+    # Filtro por empresa (Dashboard)
+    if not contas.empty and "empresa" in contas.columns:
+        empresas_opts = ["Todas"] + sorted([e for e in contas["empresa"].dropna().unique().tolist() if str(e).strip()])
+        empresa_dash = st.selectbox("Filtrar por Empresa", options=empresas_opts, index=0)
+        if empresa_dash != "Todas":
+            contas = contas[contas["empresa"] == empresa_dash]
+
+    # Filtro de período (Dashboard)
+    periodo_col1, periodo_col2 = st.columns(2)
+    hoje_norm = pd.Timestamp.today().normalize().date()
+    # Defaults baseados nos dados filtrados por empresa
+    if not contas.empty and "vencimento" in contas.columns:
+        venc_series_all = pd.to_datetime(contas["vencimento"], errors="coerce").dropna()
+        if not venc_series_all.empty:
+            periodo_ini_default = venc_series_all.min().date()
+            periodo_fim_default = venc_series_all.max().date()
+        else:
+            periodo_ini_default = hoje_norm.replace(day=1)
+            periodo_fim_default = hoje_norm
+    else:
+        periodo_ini_default = hoje_norm.replace(day=1)
+        periodo_fim_default = hoje_norm
+
+    periodo_ini = periodo_col1.date_input("Período de", value=periodo_ini_default)
+    periodo_fim = periodo_col2.date_input("Período até", value=periodo_fim_default)
+
+    # Aplica filtro de período às contas
+    if not contas.empty and "vencimento" in contas.columns:
+        v_series = pd.to_datetime(contas["vencimento"], errors="coerce").dt.date
+        contas = contas[(v_series >= periodo_ini) & (v_series <= periodo_fim)]
+
     if contas.empty:
         st.info("📭 Nenhuma conta encontrada.")
     else:
