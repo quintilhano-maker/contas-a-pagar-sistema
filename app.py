@@ -308,7 +308,7 @@ if st.session_state.get('username'):
     st.sidebar.markdown(f"👤 **Usuário:** {st.session_state['username']}")
     st.sidebar.markdown("---")
 
-page = st.sidebar.radio("Navegar", ["Lançar Contas", "Aprovações", "Pagamentos/Conciliação", "Dashboard", "ETL/Importação", "Gerenciar Usuários"], index=0)
+page = st.sidebar.radio("Navegar", ["Lançar Contas", "Cadastro de Contas", "Aprovações", "Pagamentos/Conciliação", "Dashboard", "ETL/Importação", "Gerenciar Usuários"], index=0)
 
 # Botão de logout
 st.sidebar.markdown("---")
@@ -317,16 +317,80 @@ if st.sidebar.button("🚪 Sair", use_container_width=True):
 
 if page == "Lançar Contas":
     st.header("Lançamento / Provisionamento de Contas")
+    # Carrega opções vindas do cadastro de contas
+    cadastro_df = fetch_table("cadastro_contas")
+    empresas_opts = []
+    razoes_opts = []
+    cat_titulo_opts = []
+    centro_custo_opts = []
+    class_gastos_opts = []
+    area_opts = []
+    cidade_opts = []
+    uf_opts = []
+    razao_to_cnpj = {}
+    if not cadastro_df.empty:
+        if "empresa" in cadastro_df.columns:
+            empresas_opts = sorted([e for e in cadastro_df["empresa"].dropna().astype(str).str.strip().unique().tolist() if e])
+        if "razao_social" in cadastro_df.columns:
+            razoes_opts = sorted([r for r in cadastro_df["razao_social"].dropna().astype(str).str.strip().unique().tolist() if r])
+            # Mapeia a primeira ocorrência de CNPJ para cada razão social
+            if "cnpj" in cadastro_df.columns:
+                temp = cadastro_df.dropna(subset=["razao_social"]).copy()
+                temp["razao_social"] = temp["razao_social"].astype(str).str.strip()
+                temp = temp.sort_values("criado_em") if "criado_em" in temp.columns else temp
+                for _, row in temp.iterrows():
+                    rs = row.get("razao_social")
+                    cnpj_val = row.get("cnpj")
+                    if rs and rs not in razao_to_cnpj and pd.notna(cnpj_val) and str(cnpj_val).strip():
+                        razao_to_cnpj[rs] = str(cnpj_val)
+        if "categoria_titulo" in cadastro_df.columns:
+            cat_titulo_opts = sorted([c for c in cadastro_df["categoria_titulo"].dropna().astype(str).str.strip().unique().tolist() if c])
+        if "centro_custo" in cadastro_df.columns:
+            centro_custo_opts = sorted([c for c in cadastro_df["centro_custo"].dropna().astype(str).str.strip().unique().tolist() if c])
+        if "classificacao_gastos" in cadastro_df.columns:
+            class_gastos_opts = sorted([c for c in cadastro_df["classificacao_gastos"].dropna().astype(str).str.strip().unique().tolist() if c])
+        if "area" in cadastro_df.columns:
+            area_opts = sorted([c for c in cadastro_df["area"].dropna().astype(str).str.strip().unique().tolist() if c])
+        if "cidade" in cadastro_df.columns:
+            cidade_opts = sorted([c for c in cadastro_df["cidade"].dropna().astype(str).str.strip().unique().tolist() if c])
+        if "uf" in cadastro_df.columns:
+            uf_opts = sorted([c for c in cadastro_df["uf"].dropna().astype(str).str.strip().unique().tolist() if c])
+    # Valores padrão se não houver cadastro
+    if not cat_titulo_opts:
+        cat_titulo_opts = ["Geral"]
+    # Verifica colunas existentes em 'contas' para salvar extras sem erro
+    contas_cols = []
+    try:
+        _df_contas_probe = fetch_table("contas")
+        contas_cols = list(_df_contas_probe.columns)
+    except Exception:
+        contas_cols = []
+    # Seletores reativos (fora do form) para permitir atualizar CNPJ automaticamente
+    cols_top = st.columns(2)
+    empresa_sel = cols_top[0].selectbox("Empresa *", options=empresas_opts or [""], index=0, key="launch_empresa")
+    razao_social_sel = cols_top[1].selectbox("Razão Social *", options=razoes_opts or [""], index=0, key="launch_razao")
+    fornecedor = razao_social_sel
+
     with st.form("form_conta"):
-        # Primeira linha: Empresa e Fornecedor
-        cols = st.columns(2)
-        empresa = cols[0].text_input("Empresa *", placeholder="Ex: Empresa A, Empresa B, etc.")
-        fornecedor = cols[1].text_input("Fornecedor *", placeholder="Nome do fornecedor")
         
         # Segunda linha: CNPJ e Categoria
         cols2 = st.columns(2)
-        cnpj_fornecedor = cols2[0].text_input("CNPJ do Fornecedor", placeholder="00.000.000/0000-00")
-        categoria = cols2[1].text_input("Categoria *", value="Geral")
+        cnpj_prefill = razao_to_cnpj.get(razao_social_sel, "")
+        cnpj_fornecedor = cols2[0].text_input("CNPJ do Fornecedor", value=str(cnpj_prefill) if cnpj_prefill else "", placeholder="00.000.000/0000-00", key="launch_cnpj")
+        categoria = cols2[1].selectbox("Categoria do Título *", options=cat_titulo_opts, index=0, key="launch_categoria")
+
+        # Terceira linha extra: Centro de Custo e Classificação de Gastos
+        cols_extra1 = st.columns(2)
+        centro_custo_sel = cols_extra1[0].selectbox("Centro de Custo", options=centro_custo_opts or [""], index=0)
+        class_gastos_sel = cols_extra1[1].selectbox("Classificação de Gastos", options=class_gastos_opts or [""], index=0)
+
+        # Quarta linha extra: Área e Cidade
+        cols_extra2 = st.columns(2)
+        area_sel = cols_extra2[0].selectbox("Área", options=area_opts or [""], index=0)
+        cidade_sel = cols_extra2[1].selectbox("Cidade", options=cidade_opts or [""], index=0)
+
+        # Quinta linha extra: UF
+        uf_sel = st.selectbox("UF", options=uf_opts or [""], index=0)
         
         # Terceira linha: Descrição e Número do Documento
         cols3 = st.columns(2)
@@ -337,20 +401,20 @@ if page == "Lançar Contas":
         cols4 = st.columns(3)
         competence_month = cols4[0].date_input("Competência (mês)", value=datetime.today().replace(day=1))
         vencimento = cols4[1].date_input("Vencimento *", value=datetime.today())
-        valor_previsto = cols4[2].text_input("Valor previsto (ex: 1234,56) *", placeholder="1234,56")
+        valor_previsto_num = cols4[2].number_input("Valor previsto (R$)", min_value=0.0, value=0.0, step=0.01, format="%.2f")
         
         submitted = st.form_submit_button("Salvar Provisionamento")
         if submitted:
-            if not fornecedor or not categoria or not valor_previsto or not vencimento or not empresa:
+            if not fornecedor or not categoria or not vencimento or not empresa_sel:
                 st.error("Preencha os campos obrigatórios (*)")
             else:
                 fornecedor_id = ensure_fornecedor(fornecedor, cnpj=cnpj_fornecedor)
                 categoria_id = ensure_categoria(categoria)
-                vp = to_float(valor_previsto)
-                if vp is None:
+                vp = float(valor_previsto_num or 0.0)
+                if vp < 0:
                     st.error("Valor inválido")
                 else:
-                    insert("contas", {
+                    payload_conta = {
                         "fornecedor_id": fornecedor_id,
                         "categoria_id": categoria_id,
                         "descricao": descricao,
@@ -358,9 +422,24 @@ if page == "Lançar Contas":
                         "vencimento": vencimento.strftime("%Y-%m-%d"),
                         "valor_previsto": vp,
                         "status": "provisionado",
-                        "empresa": empresa,
+                        "empresa": empresa_sel,
                         "numero_documento": numero_documento,
-                    })
+                    }
+                    # Condicionalmente adiciona campos extras se existirem na tabela
+                    extras = {
+                        "centro_custo": centro_custo_sel or None,
+                        "classificacao_gastos": class_gastos_sel or None,
+                        "area": area_sel or None,
+                        "cidade": cidade_sel or None,
+                        "uf": uf_sel or None,
+                    }
+                    # Registra o usuário criador se a coluna existir
+                    if "criado_por" in contas_cols:
+                        payload_conta["criado_por"] = st.session_state.get("username")
+                    for k, v in extras.items():
+                        if k in contas_cols and v:
+                            payload_conta[k] = v
+                    insert("contas", payload_conta)
                     st.success("Conta provisionada com sucesso!")
     df = fetch_table("contas", order="criado_em")
     if not df.empty:
@@ -489,8 +568,20 @@ if page == "Lançar Contas":
         # Mostrar resultados filtrados
         st.write(f"**📊 Resultados encontrados: {len(df_filtrado)} contas**")
         
-        # Seleciona colunas para exibição
-        cols_to_show = ["id", "empresa", "fornecedor_nome", "categoria_nome", "descricao", "numero_documento", "competencia", "vencimento", "valor_previsto", "status", "criado_em"]
+        # Anexa usuário criador ao campo 'criado_em' se disponível
+        if "criado_por" in df_filtrado.columns:
+            try:
+                df_filtrado["criado_em"] = df_filtrado.apply(lambda r: f"{r.get('criado_em','')} - {r.get('criado_por','')}", axis=1)
+            except Exception:
+                pass
+
+        # Seleciona colunas para exibição, incluindo novos campos
+        cols_to_show = [
+            "id", "empresa", "fornecedor_nome", "categoria_nome",
+            "centro_custo", "classificacao_gastos", "area", "cidade", "uf",
+            "descricao", "numero_documento", "competencia", "vencimento",
+            "valor_previsto", "status", "criado_em"
+        ]
         available_cols = [col for col in cols_to_show if col in df_filtrado.columns]
         
         st.dataframe(df_filtrado[available_cols], use_container_width=True)
@@ -519,117 +610,255 @@ if page == "Lançar Contas":
                         st.success("Conta excluída com sucesso!")
                         st.rerun()
 
+elif page == "Cadastro de Contas":
+    st.header("Cadastro de Contas")
+    st.caption("Organizado em blocos: Empresa e Fornecedor(1 e 2) e Categoria e Classificação de Gastos.")
+    with st.form("cadastro_contas_form"):
+        st.subheader("Fornecedor")
+        col_a1, col_a2 = st.columns(2)
+        razao_social = col_a1.text_input("Razão Social", placeholder="Ex: ACME LTDA")
+        cnpj = col_a2.text_input("CNPJ", placeholder="00.000.000/0000-00")
+        col_a3, col_a4 = st.columns(2)
+        cidade = col_a3.text_input("Cidade", placeholder="Ex: São Paulo")
+        uf = col_a4.selectbox(
+            "UF",
+            [
+                "AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"
+            ],
+            index=24
+        )
+
+        st.subheader("Empresa e Conta Grupo Econômico")
+        col_b1, col_b2 = st.columns(2)
+        empresa = col_b1.text_input("Empresa", placeholder="Ex: Unidade Matriz")
+        conta_pagamento = col_b2.text_input("Conta de Pagamento", placeholder="Ex: Itaú Ag 0000 CC 00000-0")
+
+        st.subheader("Categoria e Classificação de Gastos")
+        col_i1, col_i2 = st.columns(2)
+        categoria_titulo = col_i1.text_input("Categoria do Título", placeholder="Ex: Serviços, Aluguel")
+        centro_custo = col_i2.text_input("Centro de Custo", placeholder="Ex: Comercial, TI, Administrativo")
+        col_i3, col_i4 = st.columns(2)
+        area = col_i3.text_input("Área", placeholder="Ex: Operações")
+        classificacao_gastos = col_i4.text_input("Classificação de Gastos", placeholder="Ex: Operacional")
+
+        submitted = st.form_submit_button("Salvar Cadastro")
+
+        if submitted:
+            try:
+                # Normaliza UF: só aceita sigla com 2 letras; caso contrário, trata como vazio
+                if isinstance(uf, str) and len(uf.strip()) != 2:
+                    uf = None
+
+                # Normaliza strings em geral (remove espaços vazios)
+                def _nz(v):
+                    if isinstance(v, str):
+                        v2 = v.strip()
+                        return v2 if v2 else None
+                    return v
+
+                payload = {
+                    "empresa": _nz(empresa),
+                    "razao_social": _nz(razao_social),
+                    "cnpj": _nz(cnpj),
+                    "cidade": _nz(cidade),
+                    "uf": uf or None,
+                    "conta_pagamento": _nz(conta_pagamento),
+                    "categoria_titulo": _nz(categoria_titulo),
+                    "centro_custo": _nz(centro_custo),
+                    "area": _nz(area),
+                    "classificacao_gastos": _nz(classificacao_gastos),
+                }
+                # Remove campos vazios para não gravar strings vazias
+                payload_clean = {k: v for k, v in payload.items() if v not in (None, "")}
+                if not payload_clean:
+                    st.error("Preencha ao menos um campo para salvar.")
+                else:
+                    try:
+                        res = sb.table("cadastro_contas").insert(payload_clean).execute()
+                        if res and getattr(res, "data", None) is not None:
+                            st.success("Cadastro salvo com sucesso!")
+                        else:
+                            st.error("Erro ao inserir dados (resposta vazia do banco).")
+                    except Exception as e:
+                        err = str(e)
+                        if "unique" in err.lower() and "cadastro_contas" in err.lower():
+                            st.error("Registro duplicado: já existe cadastro com esta combinação de Razão Social + CNPJ.")
+                        elif "row-level security" in err.lower():
+                            st.error("RLS ativo na tabela 'cadastro_contas'. Habilite política de INSERT ou desative RLS.")
+                        else:
+                            if _str_to_bool(env_get('DEBUG')):
+                                st.error(f"Erro ao inserir: {err[:400]}")
+                            else:
+                                st.error("Erro ao inserir dados.")
+            except Exception as e:
+                msg = "Erro ao salvar o cadastro. Verifique se a tabela 'cadastro_contas' existe no Supabase."
+                if _str_to_bool(env_get('DEBUG')):
+                    st.error(f"{msg} Detalhes: {str(e)[:300]}...")
+                else:
+                    st.error(msg)
+
+    st.subheader("Registros Cadastrados")
+    df_cad = fetch_table("cadastro_contas", order="criado_em")
+    if not df_cad.empty:
+        mostrar_cols = [c for c in [
+            "id","empresa","razao_social","cnpj","cidade","uf","conta_pagamento","categoria_titulo","centro_custo","area","classificacao_gastos","criado_em"
+        ] if c in df_cad.columns]
+        st.dataframe(df_cad[mostrar_cols], use_container_width=True)
+    else:
+        st.info("Nenhum registro encontrado. Salve um cadastro para aparecer aqui.")
+
 elif page == "Aprovações":
-    st.header("Registrar Aprovação")
+    st.header("Aprovação de Contas (em massa)")
     contas = fetch_table("contas")
     pendentes = contas[contas["status"].isin(["provisionado"])].copy()
     if pendentes.empty:
         st.info("Não há contas pendentes de aprovação.")
     else:
-        # Busca nomes dos fornecedores
         fornecedores = fetch_table("fornecedores")
-        if not fornecedores.empty:
-            fornecedor_map = dict(zip(fornecedores["id"], fornecedores["nome"]))
-            pendentes["fornecedor_nome"] = pendentes["fornecedor_id"].map(fornecedor_map)
-        
-        # Cria label mais informativo
-        pendentes["label"] = pendentes.apply(lambda r: f'#{int(r["id"])} - {r.get("empresa","N/A")} | {r.get("fornecedor_nome","N/A")} | Venc: {r.get("vencimento","")} | {money(r.get("valor_previsto",0))}', axis=1)
-        escolha = st.selectbox("Conta para aprovar", options=pendentes["id"], format_func=lambda x: pendentes.loc[pendentes["id"]==x, "label"].values[0])
-        aprovado_por = st.text_input("Aprovado por *")
-        data_aprovacao = st.date_input("Data de aprovação", value=datetime.today())
-        obs = st.text_area("Observação")
-        if st.button("Confirmar Aprovação"):
-            insert("aprovacoes", {
-                "conta_id": int(escolha), 
-                "aprovado_por": aprovado_por or "Diretoria", 
-                "data_aprovacao": data_aprovacao.strftime("%Y-%m-%d"), 
-                "observacao": obs
-            })
-            upsert("contas", {"id": int(escolha), "status": "aprovado"})
-            st.success("Aprovação registrada e status atualizado para 'aprovado'.")
-    
-    # Relatório de aprovações com informações detalhadas
-    st.subheader("📋 Relatório de Aprovações")
+        categorias = fetch_table("categorias")
+        fornecedor_map = dict(zip(fornecedores["id"], fornecedores["nome"])) if not fornecedores.empty else {}
+        categoria_map = dict(zip(categorias["id"], categorias["nome"])) if not categorias.empty else {}
+
+        # Filtro por vencimento
+        st.subheader("Filtro por Vencimento")
+        try:
+            venc_series = pd.to_datetime(pendentes["vencimento"], errors="coerce").dropna()
+            min_date = venc_series.min().date() if not venc_series.empty else datetime.today().date()
+            max_date = venc_series.max().date() if not venc_series.empty else datetime.today().date()
+        except Exception:
+            min_date = max_date = datetime.today().date()
+        colf1, colf2 = st.columns(2)
+        f_ini = colf1.date_input("De", value=min_date)
+        f_fim = colf2.date_input("Até", value=max_date)
+        if f_ini and f_fim:
+            vseries = pd.to_datetime(pendentes["vencimento"], errors="coerce").dt.date
+            pendentes = pendentes[(vseries >= f_ini) & (vseries <= f_fim)]
+
+        # Monta tabela para aprovar
+        if pendentes.empty:
+            st.info("Nenhuma conta no período selecionado.")
+        else:
+            df_sel = pendentes.copy()
+            df_sel["fornecedor_nome"] = df_sel["fornecedor_id"].map(fornecedor_map)
+            df_sel["categoria_nome"] = df_sel["categoria_id"].map(categoria_map)
+            # Formata valor
+            try:
+                df_sel["valor_previsto"] = pd.to_numeric(df_sel["valor_previsto"], errors="coerce").fillna(0.0)
+            except Exception:
+                pass
+            df_sel = df_sel[[
+                "id","empresa","fornecedor_nome","categoria_nome","descricao","vencimento","valor_previsto"
+            ]]
+            st.subheader("Selecionar para Aprovar")
+            # Busca textual
+            busca_txt = st.text_input("Buscar (empresa, fornecedor, categoria ou descrição)")
+            if busca_txt:
+                try:
+                    mask = df_sel[["empresa","fornecedor_nome","categoria_nome","descricao"]].astype(str).apply(lambda c: c.str.contains(busca_txt, case=False, na=False))
+                    df_sel = df_sel[mask.any(axis=1)]
+                except Exception:
+                    pass
+            # Seleção rápida
+            sel_mode = st.radio("Seleção rápida", ["Nenhum", "Todos"], horizontal=True, index=0)
+            df_sel["Aprovar"] = (sel_mode == "Todos")
+            edited = st.data_editor(
+                df_sel,
+                use_container_width=True,
+                num_rows="fixed",
+                column_config={
+                    "Aprovar": st.column_config.CheckboxColumn("Aprovar", help="Marque para aprovar"),
+                    "valor_previsto": st.column_config.NumberColumn("Valor", format="R$ %.2f")
+                }
+            )
+            to_approve = edited[edited["Aprovar"] == True]["id"].tolist() if not isinstance(edited, list) else []
+            if st.button("Aprovar Selecionadas"):
+                if not to_approve:
+                    st.warning("Nenhuma conta selecionada.")
+                else:
+                    aprovador = st.session_state.get("username", "Diretoria")
+                    data_ap = datetime.today().strftime("%Y-%m-%d")
+                    ok = 0
+                    for cid in to_approve:
+                        try:
+                            insert("aprovacoes", {
+                                "conta_id": int(cid),
+                                "aprovado_por": aprovador,
+                                "data_aprovacao": data_ap
+                            })
+                            upsert("contas", {"id": int(cid), "status": "aprovado"})
+                            ok += 1
+                        except Exception:
+                            pass
+                    st.success(f"{ok} conta(s) aprovadas.")
+                    st.rerun()
+
+    # Tabela de Contas Aprovadas
+    st.subheader("📋 Contas Aprovadas")
     aprovacoes = fetch_table("aprovacoes", order="criado_em")
     if not aprovacoes.empty:
-        # Busca dados das contas relacionadas
         contas_aprovadas = fetch_table("contas")
         fornecedores = fetch_table("fornecedores")
-        
-        # Cria DataFrame com informações completas
-        relatorio_data = []
-        for _, aprov in aprovacoes.iterrows():
-            conta_rel = contas_aprovadas[contas_aprovadas["id"] == aprov["conta_id"]]
-            if not conta_rel.empty:
-                conta = conta_rel.iloc[0]
-                fornecedor_nome = "N/A"
-                if not fornecedores.empty:
-                    fornecedor_info = fornecedores[fornecedores["id"] == conta["fornecedor_id"]]
-                    if not fornecedor_info.empty:
-                        fornecedor_nome = fornecedor_info.iloc[0]["nome"]
-                
-                relatorio_data.append({
-                    "Empresa": conta.get("empresa", "N/A"),
-                    "Fornecedor": fornecedor_nome,
-                    "Vencimento": conta.get("vencimento", "N/A"),
-                    "Valor": money(conta.get("valor_previsto", 0)),
-                    "Aprovado por": aprov.get("aprovado_por", "N/A"),
-                    "Data aprovação": aprov.get("data_aprovacao", "N/A"),
-                    "Observação": aprov.get("observacao", ""),
-                    "Criado em": aprov.get("criado_em", "N/A")
-                })
-        
-        if relatorio_data:
-            df_relatorio = pd.DataFrame(relatorio_data)
-            st.dataframe(df_relatorio, use_container_width=True)
-            
-            # Seção de exclusão de aprovações
-            st.subheader("🗑️ Excluir Aprovação")
-            # Enriquecer rótulo com nome do fornecedor
-            fornecedores_map = {}
-            try:
-                fornecedores_df = fetch_table("fornecedores")
-                if not fornecedores_df.empty:
-                    fornecedores_map = dict(zip(fornecedores_df["id"], fornecedores_df["nome"]))
-            except Exception:
-                fornecedores_map = {}
+        categorias = fetch_table("categorias")
+        fornecedor_map = dict(zip(fornecedores["id"], fornecedores["nome"])) if not fornecedores.empty else {}
+        categoria_map = dict(zip(categorias["id"], categorias["nome"])) if not categorias.empty else {}
 
-            def _label_aprovacao(row):
-                conta_rel = contas_aprovadas[contas_aprovadas["id"] == row["conta_id"]]
-                fornecedor_nome = "N/A"
-                if not conta_rel.empty:
-                    fornecedor_id = conta_rel.iloc[0].get("fornecedor_id")
-                    if fornecedor_id in fornecedores_map:
-                        fornecedor_nome = fornecedores_map[fornecedor_id]
-                return f'#{int(row["id"])} - Conta #{row.get("conta_id","N/A")} | Fornecedor: {fornecedor_nome} | Aprovado por: {row.get("aprovado_por","N/A")} | Data: {row.get("data_aprovacao","N/A")}'
+        linhas = []
+        for _, ap in aprovacoes.iterrows():
+            conta_rel = contas_aprovadas[contas_aprovadas["id"] == ap["conta_id"]]
+            if conta_rel.empty:
+                continue
+            c = conta_rel.iloc[0]
+            linhas.append({
+                "ID Conta": int(c.get("id")),
+                "Empresa": c.get("empresa","N/A"),
+                "Fornecedor": fornecedor_map.get(c.get("fornecedor_id"), "N/A"),
+                "Categoria": categoria_map.get(c.get("categoria_id"), "N/A"),
+                "Vencimento": c.get("vencimento","N/A"),
+                "Valor": money(c.get("valor_previsto",0)),
+                "Criado em": f"{ap.get('criado_em','')} - {ap.get('aprovado_por','')}"
+            })
+        if linhas:
+            df_aprov = pd.DataFrame(linhas)
+            st.dataframe(df_aprov, use_container_width=True)
 
-            aprovacoes["label"] = aprovacoes.apply(_label_aprovacao, axis=1)
-            
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                aprov_excluir = st.selectbox("Selecione a aprovação para excluir", options=aprovacoes["id"], format_func=lambda x: aprovacoes.loc[aprovacoes["id"]==x, "label"].values[0])
-            
-            with col2:
-                st.write("")  # Espaçamento
-                st.write("")  # Espaçamento
-                if st.button("🗑️ Excluir Aprovação", type="secondary"):
-                    if aprov_excluir:
-                        # Busca a conta relacionada para reverter o status
-                        aprov_sel = aprovacoes[aprovacoes["id"] == aprov_excluir].iloc[0]
-                        conta_id = aprov_sel["conta_id"]
-                        
-                        # Exclui a aprovação
-                        sb.table("aprovacoes").delete().eq("id", int(aprov_excluir)).execute()
-                        
-                        # Reverte o status da conta para "provisionado"
-                        upsert("contas", {"id": int(conta_id), "status": "provisionado"})
-                        
-                        st.success("Aprovação excluída e status da conta revertido para 'provisionado'!")
-                        st.rerun()
+            # Excluir contas aprovadas
+            st.subheader("🗑️ Excluir Contas Aprovadas")
+            df_excluir = df_aprov[["ID Conta","Empresa","Fornecedor","Categoria","Vencimento","Valor"]].copy()
+            # Busca textual para exclusão
+            busca_del = st.text_input("Buscar para exclusão (empresa, fornecedor, categoria)")
+            if busca_del:
+                try:
+                    mask = df_excluir[["Empresa","Fornecedor","Categoria"]].astype(str).apply(lambda c: c.str.contains(busca_del, case=False, na=False))
+                    df_excluir = df_excluir[mask.any(axis=1)]
+                except Exception:
+                    pass
+            # Seleção rápida
+            sel_mode_del = st.radio("Seleção rápida (exclusão)", ["Nenhum", "Todos"], horizontal=True, index=0)
+            df_excluir["Excluir"] = (sel_mode_del == "Todos")
+            edited_del = st.data_editor(
+                df_excluir,
+                use_container_width=True,
+                num_rows="fixed",
+                column_config={
+                    "Excluir": st.column_config.CheckboxColumn("Excluir")
+                }
+            )
+            ids_del = edited_del[edited_del["Excluir"] == True]["ID Conta"].tolist() if not isinstance(edited_del, list) else []
+            if st.button("Excluir Selecionadas", type="secondary"):
+                if not ids_del:
+                    st.warning("Nenhuma conta selecionada para excluir.")
+                else:
+                    ok = 0
+                    for cid in ids_del:
+                        try:
+                            delete_conta(int(cid))
+                            ok += 1
+                        except Exception:
+                            pass
+                    st.success(f"{ok} conta(s) excluídas.")
+                    st.rerun()
         else:
-            st.info("Nenhuma aprovação encontrada.")
-    else:
-        st.info("Nenhuma aprovação registrada ainda.")
+            st.info("Nenhuma linha para exibir.")
 
 elif page == "Pagamentos/Conciliação":
     st.header("Pagamentos e Conciliação de Extrato")
@@ -823,9 +1052,23 @@ elif page == "Pagamentos/Conciliação":
         # Filtro por fornecedor
         if fornecedor_filtro != "Todos":
             candidatos = candidatos[candidatos["fornecedor_nome"] == fornecedor_filtro]
+
+        # Filtro por faixa de vencimento (contas)
+        try:
+            vseries_all = pd.to_datetime(candidatos["vencimento"], errors="coerce").dropna()
+            min_v = vseries_all.min().date() if not vseries_all.empty else datetime.today().date()
+            max_v = vseries_all.max().date() if not vseries_all.empty else datetime.today().date()
+        except Exception:
+            min_v = max_v = datetime.today().date()
+        colv1, colv2 = st.columns(2)
+        conc_venc_ini = colv1.date_input("Vencimento de (contas)", value=min_v)
+        conc_venc_fim = colv2.date_input("Vencimento até (contas)", value=max_v)
+        if "vencimento" in candidatos.columns:
+            vseries_cand = pd.to_datetime(candidatos["vencimento"], errors="coerce").dt.date
+            candidatos = candidatos[(vseries_cand >= conc_venc_ini) & (vseries_cand <= conc_venc_fim)]
         
         # Mostra quantas contas estão sendo consideradas
-        st.info(f"🔍 Considerando {len(candidatos)} contas para conciliação (Empresa: {empresa_filtro}, Fornecedor: {fornecedor_filtro})")
+        st.info(f"🔍 Considerando {len(candidatos)} contas para conciliação (Empresa: {empresa_filtro}, Fornecedor: {fornecedor_filtro}, Venc: {conc_venc_ini} a {conc_venc_fim})")
         
         for col in ["vencimento","competencia"]:
             if col in candidatos.columns:
@@ -1004,6 +1247,15 @@ elif page == "Dashboard":
         empresa_dash = st.selectbox("Filtrar por Empresa", options=empresas_opts, index=0)
         if empresa_dash != "Todas":
             contas = contas[contas["empresa"] == empresa_dash]
+
+    # Filtro por Categoria do Título
+    if not contas.empty and "categoria_id" in contas.columns and not categorias.empty:
+        cat_map_dash = dict(zip(categorias["id"], categorias["nome"]))
+        contas["categoria_nome"] = contas["categoria_id"].map(cat_map_dash)
+        cats_opts = ["Todas"] + sorted([c for c in contas["categoria_nome"].dropna().unique().tolist() if str(c).strip()])
+        cat_dash = st.selectbox("Filtrar por Categoria do Título", options=cats_opts, index=0)
+        if cat_dash != "Todas":
+            contas = contas[contas["categoria_nome"] == cat_dash]
 
     # Filtro de período (Dashboard)
     periodo_col1, periodo_col2 = st.columns(2)
@@ -1476,3 +1728,6 @@ elif page == "ETL/Importação":
                 st.success(f"Importação concluída: {inserted} linhas inseridas.")
         except Exception as e:
             st.exception(e)
+
+            
+
