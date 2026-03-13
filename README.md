@@ -90,6 +90,4 @@ Execute o script SQL fornecido no arquivo `schema.sql` no seu banco Supabase par
 - Se você já publicou chaves no histórico, gere novas no Supabase (revogue as antigas) e atualize seus segredos.
 - O usuário `admin` é criado no primeiro boot usando `ADMIN_INITIAL_PASSWORD`. Altere a senha após o primeiro login.
 
-## 📝 Licença
 
-Este projeto é de uso interno da empresa.
